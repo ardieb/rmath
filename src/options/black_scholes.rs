@@ -47,7 +47,7 @@ pub fn price_put_option<'graph, F: ag::Float>(
         - spot_price * stats::normal::cdf(g, &g.neg(d1), zero, one)
 }
 
-pub fn call_volatility<'graph, F: ag::Float>(
+pub fn implied_call_volatility<'graph, F: ag::Float>(
     g: &'graph ag::Graph<F>,
     given_call_price: &ag::Tensor<'graph, F>,
     spot_price: &ag::Tensor<'graph, F>,
@@ -73,7 +73,7 @@ pub fn call_volatility<'graph, F: ag::Float>(
     g.variable(volatility_arr.clone())
 }
 
-pub fn put_volatility<'graph, F: ag::Float>(
+pub fn implied_put_volatility<'graph, F: ag::Float>(
     g: &'graph ag::Graph<F>,
     given_put_price: &ag::Tensor<'graph, F>,
     spot_price: &ag::Tensor<'graph, F>,
