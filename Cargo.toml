@@ -1,0 +1,18 @@
+[package]
+name = "rquant"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "rquant"
+path = "src/lib.rs"
+
+[[bin]]
+name = "rquant_bin"
+path = "src/main.rs"
+
+[dependencies]
+autograd = "1.1.0"
+rand = "0.8.4"
+rayon = "1.5.1"
+num = "0.4.0"
