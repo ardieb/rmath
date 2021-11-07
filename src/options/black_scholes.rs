@@ -87,7 +87,7 @@ pub fn implied_call_volatility<F: ag::Float>(
                 &volatility,
                 risk_free_interest_rate,
             );
-            let mean_loss = g.reduce_mean(g.square(predicted_call_price - call_price), &[-1], false);
+            let mean_loss = g.square(predicted_call_price - call_price);
             let grads = &g.grad(&[mean_loss], &[volatility]);
             let update_ops = &ag::optimizers::adam::Adam::default().compute_updates(
                 &[volatility],
@@ -109,7 +109,7 @@ pub fn implied_call_volatility<F: ag::Float>(
     }
     let locked = volatility_arr
         .read()
-        .expect("Could not read lock the volatility array"); 
+        .expect("Could not read lock the volatility array");
     locked.to_owned()
 }
 
@@ -153,7 +153,7 @@ pub fn implied_put_volatility<F: ag::Float>(
                 &volatility,
                 risk_free_interest_rate,
             );
-            let mean_loss = g.reduce_mean(g.square(predicted_put_price - put_price), &[-1], false);
+            let mean_loss = g.square(predicted_put_price - put_price);
             let grads = &g.grad(&[mean_loss], &[volatility]);
             let update_ops = &ag::optimizers::adam::Adam::default().compute_updates(
                 &[volatility],
@@ -175,6 +175,33 @@ pub fn implied_put_volatility<F: ag::Float>(
     }
     let locked = volatility_arr
         .read()
-        .expect("Could not read lock the volatility array"); 
+        .expect("Could not read lock the volatility array");
     locked.to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use autograd as ag;
+    use autograd::ndarray as nd;
+    use autograd::ndarray_ext as arr;
+
+    #[test]
+    fn test_implied_call_volatility() {
+        let call_price = nd::array![10., 11., 20., 14.].into_dyn();
+        let spot_price = nd::array![100., 200., 300., 400.].into_dyn();
+        let time_to_maturity = nd::array![200., 200., 200., 200.].into_dyn();
+        let strike_price = nd::array![90., 190., 310., 440.].into_dyn();
+        let risk_free_interest_rate = 2.5;
+        let epochs = 10000;
+        let volatility = implied_call_volatility(
+            &call_price,
+            &spot_price,
+            &time_to_maturity,
+            &strike_price,
+            risk_free_interest_rate,
+            epochs,
+        );
+        println!("{:?}", volatility);
+    }
 }
