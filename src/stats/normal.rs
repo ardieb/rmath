@@ -1,5 +1,4 @@
 use autograd as ag;
-use autograd::ndarray as nd;
 
 use crate::calc;
 
@@ -30,6 +29,7 @@ pub fn pdf<'graph, F: ag::Float>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use autograd::ndarray as nd;
 
     #[test]
     pub fn test_cdf() {
@@ -43,7 +43,7 @@ mod tests {
             2.8665157187919333e-07,
             0.9999997133484281
         ];
-        ag::with(|g| {
+        ag::with(|g: &mut ag:: Graph<f64>| {
             let z = g.placeholder(&[-1]);
             let mean = 0.;
             let std = 1.;
@@ -57,7 +57,7 @@ mod tests {
     #[test]
     pub fn test_deriv_cdf_equals_pdf() {
         let zvals = nd::array![0., -1., 1., -0.5, 0.5, -5., 5.];
-        ag::with(|g| {
+        ag::with(|g: &mut ag::Graph<f64>| {
             let z = g.placeholder(&[-1]);
             let mean = 0.;
             let std = 1.;
