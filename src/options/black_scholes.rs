@@ -17,9 +17,9 @@ use crate::stats;
 /// :param: `s` The underlying stocks' prices per share.
 /// :param: `k` The options' strike prices per share.
 /// :param: `vol` The volatility of the stocks in decimal.
-/// :param: `t` The time until option maturity as decimal of a year.
 /// :param: `r` The risk free interest rate as decimal.
 /// :param: `q` The continously compounding divdend yield in decimal.
+/// :param: `t` The time until option maturity as decimal of a year.
 ///
 /// :return: `prices` The price of the options.
 pub fn call<'graph, F: ag::Float>(
@@ -27,9 +27,9 @@ pub fn call<'graph, F: ag::Float>(
     s: &ag::Tensor<'graph, F>,
     k: &ag::Tensor<'graph, F>,
     vol: &ag::Tensor<'graph, F>,
-    t: &ag::Tensor<'graph, F>,
     q: &ag::Tensor<'graph, F>,
     r: F,
+    t: F,
 ) -> ag::Tensor<'graph, F> {
     let half = F::from(0.5f64).unwrap();
     let one = F::one();
@@ -37,12 +37,12 @@ pub fn call<'graph, F: ag::Float>(
     // d1 = ln(s/k) + (vol^2 / 2 + r) * t
     //      -----------------------------
     //             vol * sqrt(t)
-    let d1 = (g.ln(s / k) + ((g.square(vol) * half) + r - q) * t) / (vol * g.sqrt(t));
+    let d1 = (g.ln(s / k) + ((g.square(vol) * half) + r - q) * t) / (vol * t.sqrt());
     // d2 = d1 - vol * sqrt(t)
-    let d2 = d1 - (vol * g.sqrt(t));
+    let d2 = d1 - (vol * t.sqrt());
     let nd1 = stats::normal::cdf(g, &d1, zero, one);
     let nd2 = stats::normal::cdf(g, &d2, zero, one);
-    s * g.exp(g.neg(t * q)) * nd1 - k * g.exp(g.neg(t * r)) * nd2
+    s * g.exp(g.neg(q * t)) * nd1 - k * (-t * r).exp() * nd2
 }
 
 /// Calculate the price of a put option based on the
@@ -56,19 +56,19 @@ pub fn call<'graph, F: ag::Float>(
 /// :param: `s` The underlying stocks' prices .
 /// :param: `k` The options' strike prices.
 /// :param: `vol` The volatility of the stocks.
-/// :param: `t` The time until option maturity.
 /// :param: `r` The risk free interest rate.
 /// :param: `q` The continously compounding divdend yield in decimal.
-///
+/// :param: `t` The time until option maturity as decimal of a year.
+/// 
 /// :return: `prices` The price of the options.
 pub fn put<'graph, F: ag::Float>(
     g: &'graph ag::Graph<F>,
     s: &ag::Tensor<'graph, F>,
     k: &ag::Tensor<'graph, F>,
     vol: &ag::Tensor<'graph, F>,
-    t: &ag::Tensor<'graph, F>,
     q: &ag::Tensor<'graph, F>,
     r: F,
+    t: F,
 ) -> ag::Tensor<'graph, F> {
     let half = F::from(0.5f64).unwrap();
     let one = F::one();
@@ -76,12 +76,12 @@ pub fn put<'graph, F: ag::Float>(
     // d1 = ln(s/k) + (vol^2 / 2 + r) * t
     //      -----------------------------
     //             vol * sqrt(t)
-    let d1 = (g.ln(s / k) + ((g.square(vol) * half) + r - q) * t) / (vol * g.sqrt(t));
+    let d1 = (g.ln(s / k) + ((g.square(vol) * half) + r - q) * t) / (vol * t.sqrt());
     // d2 = d1 - vol * sqrt(t)
-    let d2 = d1 - (vol * g.sqrt(t));
+    let d2 = d1 - (vol * t.sqrt());
     let nnegd1 = stats::normal::cdf(g, &g.neg(d1), zero, one);
     let nnegd2 = stats::normal::cdf(g, &g.neg(d2), zero, one);
-    k * g.exp(g.neg(t * r)) * nnegd2 - s * g.exp(g.neg(t * q)) * nnegd1
+    k * (-r * t).exp() * nnegd2 - s * g.exp(g.neg(q * t)) * nnegd1
 }
 
 /// Determine the implied volatility for a call option using
@@ -94,18 +94,18 @@ pub fn put<'graph, F: ag::Float>(
 /// :param: `c` The call options' prices.
 /// :param: `s` The underlying stocks' prices.
 /// :param: `k` The options' strike prices.
-/// :param: `t` The time until option maturity.
 /// :param: `r` The risk free interest rate.
 /// :param: `q` The continously compounding divdend yield in decimal.
-///
+/// :param: `t` The time until option maturity.
+/// 
 /// :return: `prices` The price of the options.
 pub fn call_iv<'graph, F: ag::Float>(
     c: ag::NdArrayView<F>,
     s: ag::NdArrayView<F>,
     k: ag::NdArrayView<F>,
-    t: ag::NdArrayView<F>,
     q: ag::NdArrayView<F>,
     r: F,
+    t: F,
 ) -> ag::NdArray<F> {
     let half = F::from(0.5f64).unwrap();
     let iv = arr::into_shared(nd::Array::from_elem(c.shape(), half));
@@ -117,9 +117,8 @@ pub fn call_iv<'graph, F: ag::Float>(
             let call_price = g.placeholder(&[-1]);
             let spot = g.placeholder(&[-1]);
             let strike = g.placeholder(&[-1]);
-            let expir = g.placeholder(&[-1]);
             let dividends = g.placeholder(&[-1]);
-            let pred = call(g, &spot, &strike, &vol, &expir, &dividends, r);
+            let pred = call(g, &spot, &strike, &vol, &dividends, r, t);
 
             let losses = g.abs(call_price - pred);
             let grads = g.grad(&[losses], &[vol]);
@@ -131,7 +130,6 @@ pub fn call_iv<'graph, F: ag::Float>(
                 call_price.given(c.view()),
                 spot.given(s.view()),
                 strike.given(k.view()),
-                expir.given(t.view()),
                 dividends.given(q.view()),
             ]);
         }
@@ -155,18 +153,18 @@ pub fn call_iv<'graph, F: ag::Float>(
 /// :param: `p` The put options' prices.
 /// :param: `s` The underlying stocks' prices.
 /// :param: `k` The options' strike prices.
-/// :param: `t` The time until option maturity.
 /// :param: `r` The risk free interest rate.
 /// :param: `q` The continously compounding divdend yield in decimal.
-///
+/// :param: `t` The time until option maturity.
+/// 
 /// :return: `prices` The price of the options.
 pub fn put_iv<'graph, F: ag::Float>(
     p: ag::NdArrayView<F>,
     s: ag::NdArrayView<F>,
     k: ag::NdArrayView<F>,
-    t: ag::NdArrayView<F>,
     q: ag::NdArrayView<F>,
     r: F,
+    t: F,
 ) -> ag::NdArray<F> {
     let half = F::from(0.5f64).unwrap();
     let iv = arr::into_shared(nd::Array::from_elem(p.shape(), half));
@@ -178,9 +176,8 @@ pub fn put_iv<'graph, F: ag::Float>(
             let put_price = g.placeholder(&[-1]);
             let spot = g.placeholder(&[-1]);
             let strike = g.placeholder(&[-1]);
-            let expir = g.placeholder(&[-1]);
             let dividends = g.placeholder(&[-1]);
-            let pred = put(g, &spot, &strike, &vol, &expir, &dividends, r);
+            let pred = put(g, &spot, &strike, &vol, &dividends, r, t);
 
             let losses = g.abs(put_price - pred);
             let grads = g.grad(&[losses], &[vol]);
@@ -192,7 +189,6 @@ pub fn put_iv<'graph, F: ag::Float>(
                 put_price.given(p.view()),
                 spot.given(s.view()),
                 strike.given(k.view()),
-                expir.given(t.view()),
                 dividends.given(q.view()),
             ]);
         }
@@ -210,39 +206,36 @@ pub fn put_iv<'graph, F: ag::Float>(
 mod tests {
     use super::*;
 
-    use autograd::ndarray as nd;
-
     #[test]
     fn test_iv() {
         let spot_price = nd::array![100., 200., 300., 400.]
             .into_dyn();
-        let time_to_maturity = nd::array![0.05, 0.05, 0.05, 0.05]
+        let strike_price = nd::array![110., 300., 600., 440.]
             .into_dyn();
-        let strike_price = nd::array![110., 300., 700., 440.]
-            .into_dyn();
-        let volatility = nd::array![0.70, 0.90, 0.40, 0.50]
+        let volatility = nd::array![0.70, 0.90, 2., 0.50]
             .into_dyn();
         let dividends = nd::array![0., 0., 0., 0.,]
             .into_dyn();
         let risk_free_interest_rate = 0.025;
+        let time_to_maturity = 0.05;
 
         ag::with(|g| {
             let s = g.variable(spot_price.clone());
-            let t = g.variable(time_to_maturity.clone());
             let k = g.variable(strike_price.clone());
             let vol = g.variable(volatility.clone());
             let q = g.variable(dividends.clone());
             let r = risk_free_interest_rate;
-            let call_price = call(g, &s, &k, &vol, &t, &q, r);
+            let t = time_to_maturity;
+            let call_price = call(g, &s, &k, &vol, &q, r, t);
             let c = call_price.eval(&[])
                 .expect("Could not evaluate call option price!");
             let iv = call_iv(
                 c.view(),
                 spot_price.view(),
                 strike_price.view(),
-                time_to_maturity.view(),
                 dividends.view(),
                 r,
+                t
             );
             println!("Actual: {:?}, Predicted: {:?}", volatility.view(), iv.view());
         });
