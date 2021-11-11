@@ -67,12 +67,12 @@ pub fn implied_call_volatility<F: ag::Float>(
             )
         )
         .all(|(a, (b, (c, d)))| { *a == *b && *b == *c && *c == *d }));
-    let rng = arr::ArrayRng::<F>::default();
-    let volatility_arr = arr::into_shared(rng.standard_uniform(given_call_price.shape()));
+    let half = F::from::<f64>(0.5).unwrap();
+    let volatility_arr = arr::into_shared(arr::NdArray::from_elem(given_call_price.shape(), half));
     let adam_state = ag::optimizers::adam::AdamState::new(&[&volatility_arr]);
 
-    for _ in 0..epochs {
-        ag::with(|g: &mut ag::Graph<F>| {
+    ag::with(|g: &mut ag::Graph<F>| {
+        for epoch in 0..epochs {
             let volatility = g.variable(volatility_arr.clone());
             let call_price = g.placeholder(&[-1]);
             let spot_price = g.placeholder(&[-1]);
@@ -88,10 +88,16 @@ pub fn implied_call_volatility<F: ag::Float>(
                 risk_free_interest_rate,
             );
             let mean_loss = g.square(predicted_call_price - call_price);
-            let grads = &g.grad(&[mean_loss], &[volatility]);
+            let grads = g.grad(&[mean_loss], &[volatility]);
+            grads.iter().for_each(|grad| println!("{:?}", grad.eval(&[
+                call_price.given(given_call_price.view().into_dyn()),
+                spot_price.given(given_spot_price.view().into_dyn()),
+                time_to_maturity.given(given_time_to_maturity.view().into_dyn()),
+                strike_price.given(given_strike_price.view().into_dyn()),
+            ])));
             let update_ops = &ag::optimizers::adam::Adam::default().compute_updates(
                 &[volatility],
-                grads,
+                &grads,
                 &adam_state,
                 g,
             );
@@ -105,12 +111,14 @@ pub fn implied_call_volatility<F: ag::Float>(
                     strike_price.given(given_strike_price.view().into_dyn()),
                 ],
             );
-        });
-    }
-    let locked = volatility_arr
-        .read()
-        .expect("Could not read lock the volatility array");
-    locked.to_owned()
+        }
+    });
+
+    let volatility = match volatility_arr.read() {
+        Ok(volatility) => volatility.clone(),
+        Err(err) => panic!("Could not read the volatility array! Error: {:?}", err)
+    };
+    volatility
 }
 
 pub fn implied_put_volatility<F: ag::Float>(
@@ -133,12 +141,12 @@ pub fn implied_put_volatility<F: ag::Float>(
             )
         )
         .all(|(a, (b, (c, d)))| { *a == *b && *b == *c && *c == *d }));
-    let rng = arr::ArrayRng::<F>::default();
-    let volatility_arr = arr::into_shared(rng.standard_uniform(given_put_price.shape()));
+    let half = F::from::<f64>(0.5).unwrap();
+    let volatility_arr = arr::into_shared(arr::NdArray::from_elem(given_put_price.shape(), half));
     let adam_state = ag::optimizers::adam::AdamState::new(&[&volatility_arr]);
 
-    for _ in 0..epochs {
-        ag::with(|g: &mut ag::Graph<F>| {
+    ag::with(|g: &mut ag::Graph<F>| {
+        for epoch in 0..epochs {
             let volatility = g.variable(volatility_arr.clone());
             let put_price = g.placeholder(&[-1]);
             let spot_price = g.placeholder(&[-1]);
@@ -154,10 +162,10 @@ pub fn implied_put_volatility<F: ag::Float>(
                 risk_free_interest_rate,
             );
             let mean_loss = g.square(predicted_put_price - put_price);
-            let grads = &g.grad(&[mean_loss], &[volatility]);
+            let grads = g.grad(&[mean_loss], &[volatility]);
             let update_ops = &ag::optimizers::adam::Adam::default().compute_updates(
                 &[volatility],
-                grads,
+                &grads,
                 &adam_state,
                 g,
             );
@@ -171,12 +179,13 @@ pub fn implied_put_volatility<F: ag::Float>(
                     strike_price.given(given_strike_price.view().into_dyn()),
                 ],
             );
-        });
-    }
-    let locked = volatility_arr
-        .read()
-        .expect("Could not read lock the volatility array");
-    locked.to_owned()
+        }
+    });
+    let volatility = match volatility_arr.read() {
+        Ok(volatility) => volatility.clone(),
+        Err(err) => panic!("Could not read the volatility array! Error: {:?}", err)
+    };
+    volatility
 }
 
 #[cfg(test)]
