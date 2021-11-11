@@ -1,210 +1,250 @@
 use autograd as ag;
+use autograd::ndarray as nd;
 use autograd::ndarray_ext as arr;
-
-use crate::stats;
 
 use ag::tensor::Variable;
 
-pub fn price_call_option<'graph, F: ag::Float>(
-    g: &'graph ag::Graph<F>,
-    spot_price: &ag::Tensor<'graph, F>,
-    time_to_maturity: &ag::Tensor<'graph, F>,
-    strike_price: &ag::Tensor<'graph, F>,
-    volatility: &ag::Tensor<'graph, F>,
-    risk_free_interest_rate: F,
-) -> ag::Tensor<'graph, F> {
-    let zero = F::zero();
-    let one = F::one();
-    let two = F::from(2f64).unwrap();
-    let d1 = g.ln(spot_price / strike_price)
-        + time_to_maturity * ((g.pow(volatility, two) / two) + risk_free_interest_rate);
-    let d2 = d1 - volatility * g.sqrt(time_to_maturity);
+use crate::stats;
 
-    spot_price * stats::normal::cdf(g, &d1, zero, one)
-        - strike_price
-            * g.exp(g.neg(time_to_maturity * risk_free_interest_rate))
-            * stats::normal::cdf(g, &d2, zero, one)
+/// Calculate the price of a call option based on the
+/// Black Scholes Merton model for options pricing.
+///
+/// This function can price multiple options at once by inputing
+/// a multidimensional set of inputs. All multi dimensional inputs
+/// must have the same shape.
+///
+/// :param: `g` The graph which generated the tensors.
+/// :param: `s` The underlying stocks' prices per share.
+/// :param: `k` The options' strike prices per share.
+/// :param: `vol` The volatility of the stocks in decimal.
+/// :param: `t` The time until option maturity as decimal of a year.
+/// :param: `r` The risk free interest rate as decimal.
+/// :param: `q` The continously compounding divdend yield in decimal.
+///
+/// :return: `prices` The price of the options.
+pub fn call<'graph, F: ag::Float>(
+    g: &'graph ag::Graph<F>,
+    s: &ag::Tensor<'graph, F>,
+    k: &ag::Tensor<'graph, F>,
+    vol: &ag::Tensor<'graph, F>,
+    t: &ag::Tensor<'graph, F>,
+    q: &ag::Tensor<'graph, F>,
+    r: F,
+) -> ag::Tensor<'graph, F> {
+    let half = F::from(0.5f64).unwrap();
+    let one = F::one();
+    let zero = F::zero();
+    // d1 = ln(s/k) + (vol^2 / 2 + r) * t
+    //      -----------------------------
+    //             vol * sqrt(t)
+    let d1 = (g.ln(s / k) + ((g.square(vol) * half) + r - q) * t) / (vol * g.sqrt(t));
+    // d2 = d1 - vol * sqrt(t)
+    let d2 = d1 - (vol * g.sqrt(t));
+    let nd1 = stats::normal::cdf(g, &d1, zero, one);
+    let nd2 = stats::normal::cdf(g, &d2, zero, one);
+    s * g.exp(g.neg(t * q)) * nd1 - k * g.exp(g.neg(t * r)) * nd2
 }
 
-pub fn price_put_option<'graph, F: ag::Float>(
+/// Calculate the price of a put option based on the
+/// Black Scholes Merton model for options pricing.
+///
+/// This function can price multiple options at once by inputing
+/// a multidimensional set of inputs. All multi dimensional inputs
+/// must have the same shape.
+///
+/// :param: `g` The graph which generated the tensors.
+/// :param: `s` The underlying stocks' prices .
+/// :param: `k` The options' strike prices.
+/// :param: `vol` The volatility of the stocks.
+/// :param: `t` The time until option maturity.
+/// :param: `r` The risk free interest rate.
+/// :param: `q` The continously compounding divdend yield in decimal.
+///
+/// :return: `prices` The price of the options.
+pub fn put<'graph, F: ag::Float>(
     g: &'graph ag::Graph<F>,
-    spot_price: &ag::Tensor<'graph, F>,
-    time_to_maturity: &ag::Tensor<'graph, F>,
-    strike_price: &ag::Tensor<'graph, F>,
-    volatility: &ag::Tensor<'graph, F>,
-    risk_free_interest_rate: F,
+    s: &ag::Tensor<'graph, F>,
+    k: &ag::Tensor<'graph, F>,
+    vol: &ag::Tensor<'graph, F>,
+    t: &ag::Tensor<'graph, F>,
+    q: &ag::Tensor<'graph, F>,
+    r: F,
 ) -> ag::Tensor<'graph, F> {
-    let zero = F::zero();
+    let half = F::from(0.5f64).unwrap();
     let one = F::one();
-    let two = F::from(2f64).unwrap();
-    let d1 = g.ln(spot_price / strike_price)
-        + time_to_maturity * ((g.pow(volatility, two) / two) + risk_free_interest_rate);
-    let d2 = d1 - volatility * g.sqrt(time_to_maturity);
-
-    strike_price
-        * g.exp(g.neg(time_to_maturity * risk_free_interest_rate))
-        * stats::normal::cdf(g, &g.neg(d2), zero, one)
-        - spot_price * stats::normal::cdf(g, &g.neg(d1), zero, one)
+    let zero = F::zero();
+    // d1 = ln(s/k) + (vol^2 / 2 + r) * t
+    //      -----------------------------
+    //             vol * sqrt(t)
+    let d1 = (g.ln(s / k) + ((g.square(vol) * half) + r - q) * t) / (vol * g.sqrt(t));
+    // d2 = d1 - vol * sqrt(t)
+    let d2 = d1 - (vol * g.sqrt(t));
+    let nnegd1 = stats::normal::cdf(g, &g.neg(d1), zero, one);
+    let nnegd2 = stats::normal::cdf(g, &g.neg(d2), zero, one);
+    k * g.exp(g.neg(t * r)) * nnegd2 - s * g.exp(g.neg(t * q)) * nnegd1
 }
 
-pub fn implied_call_volatility<F: ag::Float>(
-    given_call_price: &ag::NdArray<F>,
-    given_spot_price: &ag::NdArray<F>,
-    given_time_to_maturity: &ag::NdArray<F>,
-    given_strike_price: &ag::NdArray<F>,
-    risk_free_interest_rate: F,
-    epochs: usize,
+/// Determine the implied volatility for a call option using
+/// the Black Scholes option pricing method.
+///
+/// This function can price multiple options at once by inputing
+/// a multidimensional set of inputs. All multi dimensional inputs
+/// must have the same shape.
+///
+/// :param: `c` The call options' prices.
+/// :param: `s` The underlying stocks' prices.
+/// :param: `k` The options' strike prices.
+/// :param: `t` The time until option maturity.
+/// :param: `r` The risk free interest rate.
+/// :param: `q` The continously compounding divdend yield in decimal.
+///
+/// :return: `prices` The price of the options.
+pub fn call_iv<'graph, F: ag::Float>(
+    c: ag::NdArrayView<F>,
+    s: ag::NdArrayView<F>,
+    k: ag::NdArrayView<F>,
+    t: ag::NdArrayView<F>,
+    q: ag::NdArrayView<F>,
+    r: F,
 ) -> ag::NdArray<F> {
-    assert!(given_call_price
-        .shape()
-        .iter()
-        .zip(
-            given_spot_price.shape().iter().zip(
-                given_time_to_maturity
-                    .shape()
-                    .iter()
-                    .zip(given_strike_price.shape().iter())
-            )
-        )
-        .all(|(a, (b, (c, d)))| { *a == *b && *b == *c && *c == *d }));
-    let half = F::from::<f64>(0.5).unwrap();
-    let volatility_arr = arr::into_shared(arr::NdArray::from_elem(given_call_price.shape(), half));
-    let adam_state = ag::optimizers::adam::AdamState::new(&[&volatility_arr]);
+    let half = F::from(0.5f64).unwrap();
+    let iv = arr::into_shared(nd::Array::from_elem(c.shape(), half));
+    let adam_state = ag::optimizers::adam::AdamState::new(&[&iv]);
 
-    ag::with(|g: &mut ag::Graph<F>| {
-        for _epoch in 0..epochs {
-            let volatility = g.variable(volatility_arr.clone());
+    ag::with(|g| {
+        for _ in 0..1000 {
+            let vol = g.variable(iv.clone());
             let call_price = g.placeholder(&[-1]);
-            let spot_price = g.placeholder(&[-1]);
-            let time_to_maturity = g.placeholder(&[-1]);
-            let strike_price = g.placeholder(&[-1]);
+            let spot = g.placeholder(&[-1]);
+            let strike = g.placeholder(&[-1]);
+            let expir = g.placeholder(&[-1]);
+            let dividends = g.placeholder(&[-1]);
+            let pred = call(g, &spot, &strike, &vol, &expir, &dividends, r);
 
-            let predicted_call_price = price_call_option(
-                g,
-                &spot_price,
-                &time_to_maturity,
-                &strike_price,
-                &volatility,
-                risk_free_interest_rate,
-            );
-            let mean_loss = g.square(predicted_call_price - call_price);
-            let grads = g.grad(&[mean_loss], &[volatility]);
-            let update_ops = &ag::optimizers::adam::Adam::default().compute_updates(
-                &[volatility],
-                &grads,
-                &adam_state,
-                g,
-            );
+            let losses = g.abs(call_price - pred);
+            let grads = g.grad(&[losses], &[vol]);
 
-            g.eval(
-                update_ops,
-                &[
-                    call_price.given(given_call_price.view().into_dyn()),
-                    spot_price.given(given_spot_price.view().into_dyn()),
-                    time_to_maturity.given(given_time_to_maturity.view().into_dyn()),
-                    strike_price.given(given_strike_price.view().into_dyn()),
-                ],
-            );
+            let update_ops: Vec<ag::Tensor<F>> =
+                ag::optimizers::adam::Adam::default().compute_updates(&[vol], &grads, &adam_state, g);
+
+            g.eval(&update_ops, &[
+                call_price.given(c.view()),
+                spot.given(s.view()),
+                strike.given(k.view()),
+                expir.given(t.view()),
+                dividends.given(q.view()),
+            ]);
         }
     });
-
-    let volatility = match volatility_arr.read() {
-        Ok(volatility) => volatility.clone(),
-        Err(err) => panic!("Could not read the volatility array! Error: {:?}", err)
+    let result = {
+        let locked = iv
+            .read()
+            .expect("Failed to read the iv array!");
+        locked.clone()
     };
-    volatility
+    result
 }
 
-pub fn implied_put_volatility<F: ag::Float>(
-    given_put_price: &ag::NdArray<F>,
-    given_spot_price: &ag::NdArray<F>,
-    given_time_to_maturity: &ag::NdArray<F>,
-    given_strike_price: &ag::NdArray<F>,
-    risk_free_interest_rate: F,
-    epochs: usize,
+/// Determine the implied volatility for a put option using
+/// the Black Scholes option pricing method.
+///
+/// This function can price multiple options at once by inputing
+/// a multidimensional set of inputs. All multi dimensional inputs
+/// must have the same shape.
+///
+/// :param: `p` The put options' prices.
+/// :param: `s` The underlying stocks' prices.
+/// :param: `k` The options' strike prices.
+/// :param: `t` The time until option maturity.
+/// :param: `r` The risk free interest rate.
+/// :param: `q` The continously compounding divdend yield in decimal.
+///
+/// :return: `prices` The price of the options.
+pub fn put_iv<'graph, F: ag::Float>(
+    p: ag::NdArrayView<F>,
+    s: ag::NdArrayView<F>,
+    k: ag::NdArrayView<F>,
+    t: ag::NdArrayView<F>,
+    q: ag::NdArrayView<F>,
+    r: F,
 ) -> ag::NdArray<F> {
-    assert!(given_put_price
-        .shape()
-        .iter()
-        .zip(
-            given_spot_price.shape().iter().zip(
-                given_time_to_maturity
-                    .shape()
-                    .iter()
-                    .zip(given_strike_price.shape().iter())
-            )
-        )
-        .all(|(a, (b, (c, d)))| { *a == *b && *b == *c && *c == *d }));
-    let half = F::from::<f64>(0.5).unwrap();
-    let volatility_arr = arr::into_shared(arr::NdArray::from_elem(given_put_price.shape(), half));
-    let adam_state = ag::optimizers::adam::AdamState::new(&[&volatility_arr]);
+    let half = F::from(0.5f64).unwrap();
+    let iv = arr::into_shared(nd::Array::from_elem(p.shape(), half));
+    let adam_state = ag::optimizers::adam::AdamState::new(&[&iv]);
 
-    ag::with(|g: &mut ag::Graph<F>| {
-        for _epoch in 0..epochs {
-            let volatility = g.variable(volatility_arr.clone());
+    ag::with(|g| {
+        for _ in 0..10000 {
+            let vol = g.variable(iv.clone());
             let put_price = g.placeholder(&[-1]);
-            let spot_price = g.placeholder(&[-1]);
-            let time_to_maturity = g.placeholder(&[-1]);
-            let strike_price = g.placeholder(&[-1]);
+            let spot = g.placeholder(&[-1]);
+            let strike = g.placeholder(&[-1]);
+            let expir = g.placeholder(&[-1]);
+            let dividends = g.placeholder(&[-1]);
+            let pred = put(g, &spot, &strike, &vol, &expir, &dividends, r);
 
-            let predicted_put_price = price_put_option(
-                g,
-                &spot_price,
-                &time_to_maturity,
-                &strike_price,
-                &volatility,
-                risk_free_interest_rate,
-            );
-            let mean_loss = g.square(predicted_put_price - put_price);
-            let grads = g.grad(&[mean_loss], &[volatility]);
-            let update_ops = &ag::optimizers::adam::Adam::default().compute_updates(
-                &[volatility],
-                &grads,
-                &adam_state,
-                g,
-            );
+            let losses = g.abs(put_price - pred);
+            let grads = g.grad(&[losses], &[vol]);
 
-            g.eval(
-                update_ops,
-                &[
-                    put_price.given(given_put_price.view().into_dyn()),
-                    spot_price.given(given_spot_price.view().into_dyn()),
-                    time_to_maturity.given(given_time_to_maturity.view().into_dyn()),
-                    strike_price.given(given_strike_price.view().into_dyn()),
-                ],
-            );
+            let update_ops: Vec<ag::Tensor<F>> =
+                ag::optimizers::adam::Adam::default().compute_updates(&[vol], &grads, &adam_state, g);
+
+            g.eval(&update_ops, &[
+                put_price.given(p.view()),
+                spot.given(s.view()),
+                strike.given(k.view()),
+                expir.given(t.view()),
+                dividends.given(q.view()),
+            ]);
         }
     });
-    let volatility = match volatility_arr.read() {
-        Ok(volatility) => volatility.clone(),
-        Err(err) => panic!("Could not read the volatility array! Error: {:?}", err)
+    let result = {
+        let locked = iv
+            .read()
+            .expect("Failed to read the iv array!");
+        locked.clone()
     };
-    volatility
+    result
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     use autograd::ndarray as nd;
-    
 
     #[test]
-    fn test_implied_call_volatility() {
-        let call_price = nd::array![10., 11., 20., 14.].into_dyn();
-        let spot_price = nd::array![100., 200., 300., 400.].into_dyn();
-        let time_to_maturity = nd::array![200., 200., 200., 200.].into_dyn();
-        let strike_price = nd::array![90., 190., 310., 440.].into_dyn();
-        let risk_free_interest_rate = 2.5;
-        let epochs = 10000;
-        let volatility = implied_call_volatility(
-            &call_price,
-            &spot_price,
-            &time_to_maturity,
-            &strike_price,
-            risk_free_interest_rate,
-            epochs,
-        );
-        println!("{:?}", volatility);
+    fn test_iv() {
+        let spot_price = nd::array![100., 200., 300., 400.]
+            .into_dyn();
+        let time_to_maturity = nd::array![0.05, 0.05, 0.05, 0.05]
+            .into_dyn();
+        let strike_price = nd::array![110., 300., 700., 440.]
+            .into_dyn();
+        let volatility = nd::array![0.70, 0.90, 0.40, 0.50]
+            .into_dyn();
+        let dividends = nd::array![0., 0., 0., 0.,]
+            .into_dyn();
+        let risk_free_interest_rate = 0.025;
+
+        ag::with(|g| {
+            let s = g.variable(spot_price.clone());
+            let t = g.variable(time_to_maturity.clone());
+            let k = g.variable(strike_price.clone());
+            let vol = g.variable(volatility.clone());
+            let q = g.variable(dividends.clone());
+            let r = risk_free_interest_rate;
+            let call_price = call(g, &s, &k, &vol, &t, &q, r);
+            let c = call_price.eval(&[])
+                .expect("Could not evaluate call option price!");
+            let iv = call_iv(
+                c.view(),
+                spot_price.view(),
+                strike_price.view(),
+                time_to_maturity.view(),
+                dividends.view(),
+                r,
+            );
+            println!("Actual: {:?}, Predicted: {:?}", volatility.view(), iv.view());
+        });
     }
 }
