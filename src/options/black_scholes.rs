@@ -89,12 +89,6 @@ pub fn implied_call_volatility<F: ag::Float>(
             );
             let mean_loss = g.square(predicted_call_price - call_price);
             let grads = g.grad(&[mean_loss], &[volatility]);
-            grads.iter().for_each(|grad| println!("{:?}", grad.eval(&[
-                call_price.given(given_call_price.view().into_dyn()),
-                spot_price.given(given_spot_price.view().into_dyn()),
-                time_to_maturity.given(given_time_to_maturity.view().into_dyn()),
-                strike_price.given(given_strike_price.view().into_dyn()),
-            ])));
             let update_ops = &ag::optimizers::adam::Adam::default().compute_updates(
                 &[volatility],
                 &grads,

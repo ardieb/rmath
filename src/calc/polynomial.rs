@@ -1,6 +1,5 @@
 use autograd as ag;
 use autograd::ndarray as nd;
-use autograd::ndarray_ext as arr;
 
 fn is_vector(shape: &[usize]) -> bool {
     shape.len() == 1
