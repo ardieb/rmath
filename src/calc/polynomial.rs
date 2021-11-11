@@ -8,7 +8,7 @@ fn is_vector(shape: &[usize]) -> bool {
 
 pub struct Polynomial;
 struct PolynomialGrad {
-    n: usize
+    n: usize,
 }
 
 impl<T: ag::Float> ag::op::Op<T> for Polynomial {
@@ -85,7 +85,7 @@ impl<T: ag::Float> ag::op::Op<T> for PolynomialGrad {
             * ag::Tensor::builder()
                 .set_inputs(&[ag::tensor::Input::new(&z), ag::tensor::Input::new(&coeffs)])
                 .build(g, PolynomialGrad { n: self.n + 1 });
- 
+
         ctx.append_input_grad(Some(gz));
         ctx.append_input_grad(None);
     }

@@ -72,7 +72,7 @@ pub fn implied_call_volatility<F: ag::Float>(
     let adam_state = ag::optimizers::adam::AdamState::new(&[&volatility_arr]);
 
     ag::with(|g: &mut ag::Graph<F>| {
-        for epoch in 0..epochs {
+        for _epoch in 0..epochs {
             let volatility = g.variable(volatility_arr.clone());
             let call_price = g.placeholder(&[-1]);
             let spot_price = g.placeholder(&[-1]);
@@ -146,7 +146,7 @@ pub fn implied_put_volatility<F: ag::Float>(
     let adam_state = ag::optimizers::adam::AdamState::new(&[&volatility_arr]);
 
     ag::with(|g: &mut ag::Graph<F>| {
-        for epoch in 0..epochs {
+        for _epoch in 0..epochs {
             let volatility = g.variable(volatility_arr.clone());
             let put_price = g.placeholder(&[-1]);
             let spot_price = g.placeholder(&[-1]);
@@ -191,9 +191,9 @@ pub fn implied_put_volatility<F: ag::Float>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use autograd as ag;
+    
     use autograd::ndarray as nd;
-    use autograd::ndarray_ext as arr;
+    
 
     #[test]
     fn test_implied_call_volatility() {
