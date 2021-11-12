@@ -1,10 +1,10 @@
 use autograd as ag;
 use autograd::ndarray as nd;
-use autograd::ndarray_ext as arr;
-
-use ag::tensor::Variable;
+use autograd::array_gen as gen;
+use autograd::tensor_ops as math;
 
 use crate::stats;
+use autograd::prelude::*;
 
 /// Calculate the price of a call option based on the
 /// Black Scholes Merton model for options pricing.
@@ -13,7 +13,6 @@ use crate::stats;
 /// a multidimensional set of inputs. All multi dimensional inputs
 /// must have the same shape.
 ///
-/// :param: `g` The graph which generated the tensors.
 /// :param: `s` The underlying stocks' prices per share.
 /// :param: `k` The options' strike prices per share.
 /// :param: `vol` The volatility of the stocks in decimal.
@@ -22,27 +21,27 @@ use crate::stats;
 /// :param: `t` The time until option maturity as decimal of a year.
 ///
 /// :return: `prices` The price of the options.
-pub fn call<'graph, F: ag::Float>(
-    g: &'graph ag::Graph<F>,
-    s: &ag::Tensor<'graph, F>,
-    k: &ag::Tensor<'graph, F>,
-    vol: &ag::Tensor<'graph, F>,
-    q: &ag::Tensor<'graph, F>,
-    r: F,
-    t: F,
-) -> ag::Tensor<'graph, F> {
+pub fn call<'graph, A, F: ag::Float>(s: A, k: A, vol: A, q: A, r: F, t: F) -> ag::Tensor<'graph, F>
+where
+    A: AsRef<ag::Tensor<'graph, F>> + Copy,
+{
+    let s = s.as_ref();
+    let k = k.as_ref();
+    let vol = vol.as_ref();
+    let q = q.as_ref();
+
     let half = F::from(0.5f64).unwrap();
     let one = F::one();
     let zero = F::zero();
     // d1 = ln(s/k) + (vol^2 / 2 + r) * t
     //      -----------------------------
     //             vol * sqrt(t)
-    let d1 = (g.ln(s / k) + ((g.square(vol) * half) + r - q) * t) / (vol * t.sqrt());
+    let d1 = (math::ln(s / k) + (((math::square(vol) * half) + r) - q) * t) / (vol * t.sqrt());
     // d2 = d1 - vol * sqrt(t)
     let d2 = d1 - (vol * t.sqrt());
-    let nd1 = stats::normal::cdf(g, &d1, zero, one);
-    let nd2 = stats::normal::cdf(g, &d2, zero, one);
-    s * g.exp(g.neg(q * t)) * nd1 - k * (-t * r).exp() * nd2
+    let nd1 = stats::normal::cdf(&d1, zero, one);
+    let nd2 = stats::normal::cdf(&d2, zero, one);
+    ((s * math::exp(math::neg(q * t))) * nd1) - ((k * (-t * r).exp()) * nd2)
 }
 
 /// Calculate the price of a put option based on the
@@ -52,36 +51,35 @@ pub fn call<'graph, F: ag::Float>(
 /// a multidimensional set of inputs. All multi dimensional inputs
 /// must have the same shape.
 ///
-/// :param: `g` The graph which generated the tensors.
 /// :param: `s` The underlying stocks' prices .
 /// :param: `k` The options' strike prices.
 /// :param: `vol` The volatility of the stocks.
 /// :param: `r` The risk free interest rate.
 /// :param: `q` The continously compounding divdend yield in decimal.
 /// :param: `t` The time until option maturity as decimal of a year.
-/// 
+///
 /// :return: `prices` The price of the options.
-pub fn put<'graph, F: ag::Float>(
-    g: &'graph ag::Graph<F>,
-    s: &ag::Tensor<'graph, F>,
-    k: &ag::Tensor<'graph, F>,
-    vol: &ag::Tensor<'graph, F>,
-    q: &ag::Tensor<'graph, F>,
-    r: F,
-    t: F,
-) -> ag::Tensor<'graph, F> {
+pub fn put<'graph, A, F: ag::Float>(s: A, k: A, vol: A, q: A, r: F, t: F) -> ag::Tensor<'graph, F>
+where
+    A: AsRef<ag::Tensor<'graph, F>> + Copy,
+{
+    let s = s.as_ref();
+    let k = k.as_ref();
+    let vol = vol.as_ref();
+    let q = q.as_ref();
     let half = F::from(0.5f64).unwrap();
     let one = F::one();
     let zero = F::zero();
-    // d1 = ln(s/k) + (vol^2 / 2 + r) * t
+    // d1 = ln(s/k) + (vol^2 / 2 + r - q) * t
     //      -----------------------------
     //             vol * sqrt(t)
-    let d1 = (g.ln(s / k) + ((g.square(vol) * half) + r - q) * t) / (vol * t.sqrt());
+
+    let d1 = (math::ln(s / k) + (((math::square(vol) * half) + r) - q) * t) / (vol * t.sqrt());
     // d2 = d1 - vol * sqrt(t)
     let d2 = d1 - (vol * t.sqrt());
-    let nnegd1 = stats::normal::cdf(g, &g.neg(d1), zero, one);
-    let nnegd2 = stats::normal::cdf(g, &g.neg(d2), zero, one);
-    k * (-r * t).exp() * nnegd2 - s * g.exp(g.neg(q * t)) * nnegd1
+    let nnegd1 = stats::normal::cdf(&math::neg(d1), zero, one);
+    let nnegd2 = stats::normal::cdf(&math::neg(d2), zero, one);
+    ((k * (-r * t).exp()) * nnegd2) - ((s * math::exp(math::neg(q * t))) * nnegd1)
 }
 
 /// Determine the implied volatility for a call option using
@@ -97,7 +95,7 @@ pub fn put<'graph, F: ag::Float>(
 /// :param: `r` The risk free interest rate.
 /// :param: `q` The continously compounding divdend yield in decimal.
 /// :param: `t` The time until option maturity.
-/// 
+///
 /// :return: `prices` The price of the options.
 pub fn call_iv<'graph, F: ag::Float>(
     c: ag::NdArrayView<F>,
@@ -107,40 +105,37 @@ pub fn call_iv<'graph, F: ag::Float>(
     r: F,
     t: F,
 ) -> ag::NdArray<F> {
-    let half = F::from(0.5f64).unwrap();
-    let iv = arr::into_shared(nd::Array::from_elem(c.shape(), half));
-    let adam_state = ag::optimizers::adam::AdamState::new(&[&iv]);
+    let mut env = ag::VariableEnvironment::new();
+    let ret_id = env.name("vol").set(gen::ones(c.shape()));
 
-    ag::with(|g| {
-        for _ in 0..1000 {
-            let vol = g.variable(iv.clone());
-            let call_price = g.placeholder(&[-1]);
-            let spot = g.placeholder(&[-1]);
-            let strike = g.placeholder(&[-1]);
-            let dividends = g.placeholder(&[-1]);
-            let pred = call(g, &spot, &strike, &vol, &dividends, r, t);
+    let adam = ag::optimizers::adam::Adam::default("AdamIV", env.default_namespace().current_var_ids(), &mut env);
 
-            let losses = g.abs(call_price - pred);
-            let grads = g.grad(&[losses], &[vol]);
+    for _ in 0..1000 {
+        env.run(|ctx| {
+            let vol = ctx.variable("vol");
+            let call_price = ctx.placeholder("c", &[-1]);
+            let spot = ctx.placeholder("s", &[-1]);
+            let strike = ctx.placeholder("k", &[-1]);
+            let dividends = ctx.placeholder("q", &[-1]);
+            let pred = call(&spot, &strike, &vol, &dividends, r, t);
 
-            let update_ops: Vec<ag::Tensor<F>> =
-                ag::optimizers::adam::Adam::default().compute_updates(&[vol], &grads, &adam_state, g);
+            let losses = math::abs(call_price - pred);
+            let grads = math::grad(&[losses], &[vol]);
+            
+            let mut feeder = ag::Feeder::new();
+            feeder.push(call_price, c.view())
+                  .push(spot, s.view())
+                  .push(strike, k.view())
+                  .push(dividends, q.view());
 
-            g.eval(&update_ops, &[
-                call_price.given(c.view()),
-                spot.given(s.view()),
-                strike.given(k.view()),
-                dividends.given(q.view()),
-            ]);
-        }
-    });
-    let result = {
-        let locked = iv
-            .read()
-            .expect("Failed to read the iv array!");
-        locked.clone()
-    };
-    result
+            adam.update(&[vol], &grads, ctx, feeder);
+        });
+    }
+
+    env.get_array_by_id(ret_id)
+        .unwrap()
+        .clone()
+        .into_inner()
 }
 
 /// Determine the implied volatility for a put option using
@@ -156,7 +151,7 @@ pub fn call_iv<'graph, F: ag::Float>(
 /// :param: `r` The risk free interest rate.
 /// :param: `q` The continously compounding divdend yield in decimal.
 /// :param: `t` The time until option maturity.
-/// 
+///
 /// :return: `prices` The price of the options.
 pub fn put_iv<'graph, F: ag::Float>(
     p: ag::NdArrayView<F>,
@@ -166,40 +161,37 @@ pub fn put_iv<'graph, F: ag::Float>(
     r: F,
     t: F,
 ) -> ag::NdArray<F> {
-    let half = F::from(0.5f64).unwrap();
-    let iv = arr::into_shared(nd::Array::from_elem(p.shape(), half));
-    let adam_state = ag::optimizers::adam::AdamState::new(&[&iv]);
+    let mut env = ag::VariableEnvironment::new();
+    let ret_id = env.name("vol").set(gen::ones(p.shape()));
 
-    ag::with(|g| {
-        for _ in 0..10000 {
-            let vol = g.variable(iv.clone());
-            let put_price = g.placeholder(&[-1]);
-            let spot = g.placeholder(&[-1]);
-            let strike = g.placeholder(&[-1]);
-            let dividends = g.placeholder(&[-1]);
-            let pred = put(g, &spot, &strike, &vol, &dividends, r, t);
+    let adam = ag::optimizers::adam::Adam::default("AdamIV", env.default_namespace().current_var_ids(), &mut env);
 
-            let losses = g.abs(put_price - pred);
-            let grads = g.grad(&[losses], &[vol]);
+    for _ in 0..1000 {
+        env.run(|ctx| {
+            let vol = ctx.variable("vol");
+            let put_price = ctx.placeholder("p", &[-1]);
+            let spot = ctx.placeholder("s", &[-1]);
+            let strike = ctx.placeholder("k", &[-1]);
+            let dividends = ctx.placeholder("q", &[-1]);
+            let pred = call(&spot, &strike, &vol, &dividends, r, t);
 
-            let update_ops: Vec<ag::Tensor<F>> =
-                ag::optimizers::adam::Adam::default().compute_updates(&[vol], &grads, &adam_state, g);
+            let losses = math::abs(put_price - pred);
+            let grads = math::grad(&[losses], &[vol]);
+            
+            let mut feeder = ag::Feeder::new();
+            feeder.push(put_price, p.view())
+                  .push(spot, s.view())
+                  .push(strike, k.view())
+                  .push(dividends, q.view());
 
-            g.eval(&update_ops, &[
-                put_price.given(p.view()),
-                spot.given(s.view()),
-                strike.given(k.view()),
-                dividends.given(q.view()),
-            ]);
-        }
-    });
-    let result = {
-        let locked = iv
-            .read()
-            .expect("Failed to read the iv array!");
-        locked.clone()
-    };
-    result
+            adam.update(&[vol], &grads, ctx, feeder);
+        });
+    }
+
+    env.get_array_by_id(ret_id)
+        .unwrap()
+        .clone()
+        .into_inner()
 }
 
 #[cfg(test)]
@@ -208,36 +200,45 @@ mod tests {
 
     #[test]
     fn test_iv() {
-        let spot_price = nd::array![100., 200., 300., 400.]
-            .into_dyn();
-        let strike_price = nd::array![110., 300., 600., 440.]
-            .into_dyn();
-        let volatility = nd::array![0.70, 0.90, 2., 0.50]
-            .into_dyn();
-        let dividends = nd::array![0., 0., 0., 0.,]
-            .into_dyn();
+        let spot_price = (nd::array![40.71]).into_dyn();
+        let strike_price = (nd::array![30.]).into_dyn();
+        let volatility = (nd::array![0.5654]).into_dyn();
+        let dividends = (nd::array![0.]).into_dyn();
         let risk_free_interest_rate = 0.025;
-        let time_to_maturity = 0.05;
+        let time_to_maturity = 190. / 365.;
 
-        ag::with(|g| {
-            let s = g.variable(spot_price.clone());
-            let k = g.variable(strike_price.clone());
-            let vol = g.variable(volatility.clone());
-            let q = g.variable(dividends.clone());
+        let mut env = ag::VariableEnvironment::new();
+        env.name("s").set(spot_price.clone());
+        env.name("k").set(strike_price.clone());
+        env.name("vol").set(volatility.clone());
+        env.name("q").set(dividends.clone());
+
+        env.run(|ctx| {
+            let s = ctx.variable("s");
+            let k = ctx.variable("k");
+            let vol = ctx.variable("vol");
+            let q = ctx.variable("q");
             let r = risk_free_interest_rate;
             let t = time_to_maturity;
-            let call_price = call(g, &s, &k, &vol, &q, r, t);
-            let c = call_price.eval(&[])
+            let call_price = call(&s, &k, &vol, &q, r, t);
+            let c = call_price
+                .eval(ctx)
                 .expect("Could not evaluate call option price!");
+
             let iv = call_iv(
                 c.view(),
                 spot_price.view(),
                 strike_price.view(),
                 dividends.view(),
                 r,
-                t
+                t,
             );
-            println!("Actual: {:?}, Predicted: {:?}", volatility.view(), iv.view());
+
+            println!(
+                "Actual: {:?}, Predicted: {:?}",
+                volatility.view(),
+                iv.view()
+            );
         });
     }
 }

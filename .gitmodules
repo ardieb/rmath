@@ -1,0 +1,3 @@
+[submodule "rust-autograd"]
+	path = rust-autograd
+	url = https://github.com/ardieb/rust-autograd
