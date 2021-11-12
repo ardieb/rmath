@@ -113,7 +113,7 @@ fn eval_one<F: ag::Float>(s: F, k: F, vol: F, q: F, r: F, t: F, ty: OptionType) 
     for j in 0..n + 1 {
         let us = j as i32;
         let steps = n as i32;
-        let stock_price = s * u.powi(2 * (us - steps));
+        let stock_price = s * u.powi(2 * us - steps);
         let exercise_profit = match ty {
             OptionType::Call => (stock_price - k).max(F::zero()),
             OptionType::Put => (k - stock_price).max(F::zero()),
@@ -124,8 +124,8 @@ fn eval_one<F: ag::Float>(s: F, k: F, vol: F, q: F, r: F, t: F, ty: OptionType) 
     for i in (0..n).rev() {
         for j in (0..n).rev() {
             let us = j as i32;
-            let steps = n as i32;
-            let stock_price = s * u.powi(2 * us - steps);
+            let steps = i as i32;
+            let stock_price = s * u.powi(us) * d.powi(steps - us);
             let exercise_profit = match ty {
                 OptionType::Call => (stock_price - k).max(F::zero()),
                 OptionType::Put => (k - stock_price).max(F::zero()),
@@ -173,6 +173,12 @@ mod tests {
                 .eval(ctx)
                 .expect("Could not evaluate call option price!");
             println!("{:?}", c.view());
+
+            let put_price = put(&s, &k, &vol, &q, r, t);
+            let p = put_price
+                .eval(ctx)
+                .expect("Could not evaluate put option price!");
+            println!("{:?}", p.view());
         })
     }
 }
