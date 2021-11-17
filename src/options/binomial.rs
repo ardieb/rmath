@@ -129,16 +129,16 @@ pub fn call_iv<'graph, F: ag::Float>(
             let h = math::ones(&[1i32], ctx) * F::from(0.05f64).unwrap();
 
             let m = 1;
-            let n = 8;
+            let n = 2;
 
-            let losses = (-4..5)
-                .map(|i: i32| {
+            let losses = (-n/2..n/2+1)
+                .map(|i| {
                     let voli = vol + (h * F::from(i).unwrap());
                     let pred = call(&spot, &strike, &voli, &dividends, r, t);
                     math::abs(call_price - pred)
                 })
                 .collect::<Vec<_>>();
-            let grad = math::finite_difference(m, n, h, &losses[..]);
+            let grad = math::finite_difference(m, n as usize, h, &losses[..]);
 
             let mut feeder = ag::Feeder::new();
             feeder
