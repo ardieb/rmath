@@ -1,5 +1,4 @@
 use autograd as ag;
-use autograd::ndarray as nd;
 use autograd::array_gen as gen;
 use autograd::tensor_ops as math;
 
@@ -192,53 +191,4 @@ pub fn put_iv<'graph, F: ag::Float>(
         .unwrap()
         .clone()
         .into_inner()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_iv() {
-        let spot_price = (nd::array![40.71]).into_dyn();
-        let strike_price = (nd::array![30.]).into_dyn();
-        let volatility = (nd::array![0.5654]).into_dyn();
-        let dividends = (nd::array![0.]).into_dyn();
-        let risk_free_interest_rate = 0.025;
-        let time_to_maturity = 190. / 365.;
-
-        let mut env = ag::VariableEnvironment::new();
-        env.name("s").set(spot_price.clone());
-        env.name("k").set(strike_price.clone());
-        env.name("vol").set(volatility.clone());
-        env.name("q").set(dividends.clone());
-
-        env.run(|ctx| {
-            let s = ctx.variable("s");
-            let k = ctx.variable("k");
-            let vol = ctx.variable("vol");
-            let q = ctx.variable("q");
-            let r = risk_free_interest_rate;
-            let t = time_to_maturity;
-            let call_price = call(&s, &k, &vol, &q, r, t);
-            let c = call_price
-                .eval(ctx)
-                .expect("Could not evaluate call option price!");
-
-            let iv = call_iv(
-                c.view(),
-                spot_price.view(),
-                strike_price.view(),
-                dividends.view(),
-                r,
-                t,
-            );
-
-            println!(
-                "Actual: {:?}, Predicted: {:?}",
-                volatility.view(),
-                iv.view()
-            );
-        });
-    }
 }

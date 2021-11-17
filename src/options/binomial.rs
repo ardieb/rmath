@@ -128,8 +128,8 @@ pub fn call_iv<'graph, F: ag::Float>(
 
             let h = math::ones(&[1i32], ctx) * F::from(0.05f64).unwrap();
 
-            let m = 1;
-            let n = 2;
+            let m: i32 = 1;
+            let n: i32 = 2;
 
             let losses = (-n/2..n/2+1)
                 .map(|i| {
@@ -138,11 +138,78 @@ pub fn call_iv<'graph, F: ag::Float>(
                     math::abs(call_price - pred)
                 })
                 .collect::<Vec<_>>();
-            let grad = math::finite_difference(m, n as usize, h, &losses[..]);
+            let grad = math::finite_difference(m as usize, n as usize, h, &losses[..]);
 
             let mut feeder = ag::Feeder::new();
             feeder
                 .push(call_price, c.view())
+                .push(spot, s.view())
+                .push(strike, k.view())
+                .push(dividends, q.view());
+
+            adam.update(&[vol], &[grad], ctx, feeder);
+        });
+    }
+
+    env.get_array_by_id(ret_id).unwrap().clone().into_inner()
+}
+
+/// Calculate the implied volatility based on the
+/// Binomial model for options pricing.
+///
+/// This function can price multiple options at once by inputing
+/// a multidimensional set of inputs. All multi dimensional inputs
+/// must have the same shape.
+///
+/// * `p`: The price of the put options.
+/// * `s`: The underlying stocks' prices per share.
+/// * `k`: The options' strike prices per share.
+/// * `r`: The risk free interest rate as decimal.
+/// * `q`: The divided of the stock per year as decimal.
+/// * `t`: The time until option maturity as decimal of a year.
+///
+/// * `prices`: The price of the options.
+pub fn put_iv<'graph, F: ag::Float>(
+    p: ag::NdArrayView<F>,
+    s: ag::NdArrayView<F>,
+    k: ag::NdArrayView<F>,
+    q: ag::NdArrayView<F>,
+    r: F,
+    t: F,
+) -> ag::NdArray<F> {
+    let mut env = ag::VariableEnvironment::new();
+    let ret_id = env.name("vol").set(gen::ones(p.shape()));
+
+    let adam = ag::optimizers::adam::Adam::default(
+        "AdamIV",
+        env.default_namespace().current_var_ids(),
+        &mut env,
+    );
+    for _ in 0..1000 {
+        env.run(|ctx| {
+            let vol = ctx.variable("vol");
+            let put_price = ctx.placeholder("p", &[-1]);
+            let spot = ctx.placeholder("s", &[-1]);
+            let strike = ctx.placeholder("k", &[-1]);
+            let dividends = ctx.placeholder("q", &[-1]);
+
+            let h = math::ones(&[1i32], ctx) * F::from(0.05f64).unwrap();
+
+            let m: i32 = 1;
+            let n: i32  = 2;
+
+            let losses = (-n/2..n/2+1)
+                .map(|i| {
+                    let voli = vol + (h * F::from(i).unwrap());
+                    let pred = put(&spot, &strike, &voli, &dividends, r, t);
+                    math::abs(put_price - pred)
+                })
+                .collect::<Vec<_>>();
+            let grad = math::finite_difference(m as usize, n as usize, h, &losses[..]);
+
+            let mut feeder = ag::Feeder::new();
+            feeder
+                .push(put_price, p.view())
                 .push(spot, s.view())
                 .push(strike, k.view())
                 .push(dividends, q.view());
@@ -205,68 +272,4 @@ fn eval_one<F: ag::Float>(s: F, k: F, vol: F, q: F, r: F, t: F, ty: OptionType) 
     }
 
     dp[[0, 0]]
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_call() {
-        let spot_price = nd::array![40.74].into_dyn();
-        let strike_price = nd::array![30.].into_dyn();
-        let volatility = nd::array![0.5654].into_dyn();
-        let dividends = nd::array![0.].into_dyn();
-
-        let mut env = ag::VariableEnvironment::new();
-        env.name("s").set(spot_price.clone());
-        env.name("k").set(strike_price.clone());
-        env.name("vol").set(volatility.clone());
-        env.name("q").set(dividends.clone());
-
-        let risk_free_interest_rate = 0.025;
-        let time_to_maturity = 189. / 365.;
-        env.run(|ctx| {
-            let s = ctx.variable("s");
-            let k = ctx.variable("k");
-            let vol = ctx.variable("vol");
-            let q = ctx.variable("q");
-            let r = risk_free_interest_rate;
-            let t = time_to_maturity;
-
-            let call_price = call(&s, &k, &vol, &q, r, t);
-            let c = call_price
-                .eval(ctx)
-                .expect("Could not evaluate call option price!");
-            println!(
-                "Draft Kings Call Option Price: 189 days @ $30 {:?}",
-                c.view()
-            );
-
-            let put_price = put(&s, &k, &vol, &q, r, t);
-            let p = put_price
-                .eval(ctx)
-                .expect("Could not evaluate put option price!");
-            println!(
-                "Draft Kings Put Option Price: 189 days @ $30 {:?}",
-                p.view()
-            );
-
-            let iv = call_iv(c.view(), spot_price.view(), strike_price.view(), dividends.view(), r, t);
-            println!("Draft Kings Call Option Implied Volatility: {:?}", iv.view());
-        })
-    }
-
-    #[test]
-    fn test_concat() {
-        ag::run(|ctx: &mut ag::Context<f64>| {
-            let arr1 = math::ones(&[2], ctx);
-            let arr2 = math::zeros(&[2], ctx);
-            let arr1 = arr1.expand_dims(&[-1]);
-            let arr2 = arr2.expand_dims(&[-1]);
-            let arr3 = math::concat(&[arr1, arr2], 0);
-            let output = arr3.eval(ctx).unwrap();
-            println!("{:?}", output)
-        })
-    }
 }
