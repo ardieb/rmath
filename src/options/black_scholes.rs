@@ -48,7 +48,7 @@ impl OptionPricingModel for BlackScholesPricingModel {
         let m: i32 = 1;
         let n: i32 = 2;
         // Hacky way to get a scalar tensor.
-        let h = math::reduce_sum(math::flatten(s.as_ref()) * F::zero(), &[-1_i32], false) + F::from(0.05_f64).unwrap();
+        let h = F::from(0.05_f64).unwrap();
 
         let stencil_points = (-n / 2..n / 2 + 1)
             .map(|i| {
@@ -70,7 +70,7 @@ impl OptionPricingModel for BlackScholesPricingModel {
         let m: i32 = 1;
         let n: i32 = 2;
         // Hacky way to get a scalar tensor.
-        let h = math::reduce_sum(math::flatten(s.as_ref()) * F::zero(), &[-1_i32], false) + F::from(0.05_f64).unwrap();
+        let h = F::from(0.05_f64).unwrap();
 
         let stencil_points = (-n / 2..n / 2 + 1)
             .map(|i| {
