@@ -29,7 +29,7 @@ pub trait OptionPricingModel {
         A: AsRef<ag::Tensor<'graph, F>> + Copy;
     
     /// Calculate the implied volatility based on the
-    /// model's pricing solution
+    /// model's pricing solution.
     ///
     /// This function can price multiple options at once by inputing
     /// a multidimensional set of inputs. All multi dimensional inputs
@@ -43,7 +43,7 @@ pub trait OptionPricingModel {
     /// * `q`: The divided of the stock per year as decimal.
     /// * `t`: The time until option maturity as decimal of a year.
     ///
-    /// * `prices`: The price of the options.
+    /// * `volatility`: The implied volatility of the options.
     fn implied_volatility<F: ag::Float>(
         ty: OptionType, 
         p: ag::NdArrayView<F>,
@@ -69,7 +69,7 @@ pub trait OptionPricingModel {
     /// * `q`: The divided of the stock per year as decimal.
     /// * `t`: The time until option maturity as decimal of a year.
     ///
-    /// * `prices`: The price of the options.
+    /// * `delta`: The change in option value per change in underlying stock price.
     fn delta<'graph, A, F: ag::Float>(ty: OptionType, s: A, k: A, vol: A, q: A, r: F, t: F) -> ag::Tensor<'graph, F> 
     where
         A: AsRef<ag::Tensor<'graph, F>> + Copy;
@@ -89,7 +89,7 @@ pub trait OptionPricingModel {
     /// * `q`: The divided of the stock per year as decimal.
     /// * `t`: The time until option maturity as decimal of a year.
     ///
-    /// * `prices`: The price of the options.
+    /// * `theta`: The change in option value per change in time to experiation.
     fn theta<'graph, A, F: ag::Float>(ty: OptionType, s: A, k: A, vol: A, q: A, r: F, t: F) -> ag::Tensor<'graph, F> 
     where
         A: AsRef<ag::Tensor<'graph, F>> + Copy;
@@ -109,7 +109,7 @@ pub trait OptionPricingModel {
     /// * `q`: The divided of the stock per year as decimal.
     /// * `t`: The time until option maturity as decimal of a year.
     ///
-    /// * `prices`: The price of the options.
+    /// * `gamma`: The change in option `delta` per change in time to expiration.
     fn gamma<'graph, A, F: ag::Float>(ty: OptionType, s: A, k: A, vol: A, q: A, r: F, t: F) -> ag::Tensor<'graph, F> 
     where
         A: AsRef<ag::Tensor<'graph, F>> + Copy;
@@ -129,7 +129,7 @@ pub trait OptionPricingModel {
     /// * `q`: The divided of the stock per year as decimal.
     /// * `t`: The time until option maturity as decimal of a year.
     ///
-    /// * `prices`: The price of the options.
+    /// * `vega`: The change in option price per change in volatility.
     fn vega<'graph, A, F: ag::Float>(ty: OptionType, s: A, k: A, vol: A, q: A, r: F, t: F) -> ag::Tensor<'graph, F> 
     where
         A: AsRef<ag::Tensor<'graph, F>> + Copy;
