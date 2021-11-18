@@ -2,7 +2,6 @@ use autograd as ag;
 use autograd::array_gen as gen;
 use autograd::tensor_ops as math;
 
-use crate::stats;
 use autograd::prelude::*;
 
 /// Calculate the price of a call option based on the
@@ -38,8 +37,8 @@ where
     let d1 = (math::ln(s / k) + (((math::square(vol) * half) + r) - q) * t) / (vol * t.sqrt());
     // d2 = d1 - vol * sqrt(t)
     let d2 = d1 - (vol * t.sqrt());
-    let nd1 = stats::normal::cdf(&d1, zero, one);
-    let nd2 = stats::normal::cdf(&d2, zero, one);
+    let nd1 = math::normal_cdf(&d1, zero, one);
+    let nd2 = math::normal_cdf(&d2, zero, one);
     ((s * math::exp(math::neg(q * t))) * nd1) - ((k * (-t * r).exp()) * nd2)
 }
 
@@ -76,8 +75,8 @@ where
     let d1 = (math::ln(s / k) + (((math::square(vol) * half) + r) - q) * t) / (vol * t.sqrt());
     // d2 = d1 - vol * sqrt(t)
     let d2 = d1 - (vol * t.sqrt());
-    let nnegd1 = stats::normal::cdf(&math::neg(d1), zero, one);
-    let nnegd2 = stats::normal::cdf(&math::neg(d2), zero, one);
+    let nnegd1 = math::normal_cdf(&math::neg(d1), zero, one);
+    let nnegd2 = math::normal_cdf(&math::neg(d2), zero, one);
     ((k * (-r * t).exp()) * nnegd2) - ((s * math::exp(math::neg(q * t))) * nnegd1)
 }
 
