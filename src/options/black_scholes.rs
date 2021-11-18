@@ -3,23 +3,99 @@ use autograd::array_gen as gen;
 use autograd::tensor_ops as math;
 
 use autograd::prelude::*;
+use crate::options::model::*;
 
-/// Calculate the price of a call option based on the
-/// Black Scholes Merton model for options pricing.
-///
-/// This function can price multiple options at once by inputing
-/// a multidimensional set of inputs. All multi dimensional inputs
-/// must have the same shape.
-///
-/// :param: `s` The underlying stocks' prices per share.
-/// :param: `k` The options' strike prices per share.
-/// :param: `vol` The volatility of the stocks in decimal.
-/// :param: `r` The risk free interest rate as decimal.
-/// :param: `q` The continously compounding divdend yield in decimal.
-/// :param: `t` The time until option maturity as decimal of a year.
-///
-/// :return: `prices` The price of the options.
-pub fn call<'graph, A, F: ag::Float>(s: A, k: A, vol: A, q: A, r: F, t: F) -> ag::Tensor<'graph, F>
+pub struct BlackScholesPricingModel;
+
+impl OptionPricingModel for BlackScholesPricingModel {
+    fn price<'graph, A, F: ag::Float>(ty: OptionType, s: A, k: A, vol: A, q: A, r: F, t: F) -> ag::Tensor<'graph, F> 
+    where
+        A: AsRef<ag::Tensor<'graph, F>> + Copy {
+        match ty {
+            OptionType::Call => call(s, k, vol, q, r, t),
+            OptionType::Put => put(s, k, vol, q, r, t),
+        }
+    }
+
+    fn implied_volatility<F: ag::Float>(
+        ty: OptionType, 
+        p: ag::NdArrayView<F>,
+        s: ag::NdArrayView<F>,
+        k: ag::NdArrayView<F>,
+        q: ag::NdArrayView<F>,
+        r: F,
+        t: F,
+    ) -> ag::NdArray<F> {
+        match ty {
+            OptionType::Call => call_iv(p, s, k, q, r, t),
+            OptionType::Put => put_iv(p, s, k, q, r, t),
+        }
+    }
+
+    fn delta<'graph, A, F: ag::Float>(ty: OptionType, s: A, k: A, vol: A, q: A, r: F, t: F) -> ag::Tensor<'graph, F> 
+    where
+        A: AsRef<ag::Tensor<'graph, F>> + Copy
+    {
+        let stock_price = s.as_ref();
+        let price = BlackScholesPricingModel::price(ty, s, k, vol, q, r, t);
+        math::grad(&[price], &[stock_price])[0]
+    }
+
+    fn theta<'graph, A, F: ag::Float> (ty: OptionType, s: A, k: A, vol: A, q: A, r: F, t: F) -> ag::Tensor<'graph, F>
+    where
+        A: AsRef<ag::Tensor<'graph, F>> + Copy
+    {
+        let m: i32 = 1;
+        let n: i32 = 2;
+        // Hacky way to get a scalar tensor.
+        let h = math::reduce_sum(math::flatten(s.as_ref()) * F::zero(), &[-1_i32], false) + F::from(0.05_f64).unwrap();
+
+        let stencil_points = (-n / 2..n / 2 + 1)
+            .map(|i| {
+                let ti = t - (F::from(i).unwrap() * F::from(0.05_f64).unwrap());
+                let pred = BlackScholesPricingModel::price(
+                    ty, s.as_ref(), k.as_ref(), vol.as_ref(), q.as_ref(), r, ti,
+                );
+                pred
+            })
+            .collect::<Vec<_>>();
+        let grad = math::finite_difference(m as usize, n as usize, h, &stencil_points[..]);
+        grad
+    }
+
+    fn gamma<'graph, A, F: ag::Float>(ty: OptionType, s: A, k: A, vol: A, q: A, r: F, t: F) -> ag::Tensor<'graph, F>
+    where
+        A: AsRef<ag::Tensor<'graph, F>> + Copy
+    {
+        let m: i32 = 1;
+        let n: i32 = 2;
+        // Hacky way to get a scalar tensor.
+        let h = math::reduce_sum(math::flatten(s.as_ref()) * F::zero(), &[-1_i32], false) + F::from(0.05_f64).unwrap();
+
+        let stencil_points = (-n / 2..n / 2 + 1)
+            .map(|i| {
+                let ti = t - (F::from(i).unwrap() * F::from(0.05_f64).unwrap());
+                let pred = BlackScholesPricingModel::delta(
+                    ty, s.as_ref(), k.as_ref(), vol.as_ref(), q.as_ref(), r, ti,
+                );
+                pred
+            })
+            .collect::<Vec<_>>();
+        let grad = math::finite_difference(m as usize, n as usize, h, &stencil_points[..]);
+        grad
+    }
+
+    fn vega<'graph, A, F: ag::Float>(ty: OptionType, s: A, k: A, vol: A, q: A, r: F, t: F) -> ag::Tensor<'graph, F> 
+    where
+        A: AsRef<ag::Tensor<'graph, F>> + Copy
+    {
+        let volitility = s.as_ref();
+        let price = BlackScholesPricingModel::price(ty, s, k, vol, q, r, t);
+        math::grad(&[price], &[volitility])[0]
+    }
+}
+
+fn call<'graph, A, F: ag::Float>(s: A, k: A, vol: A, q: A, r: F, t: F) -> ag::Tensor<'graph, F>
 where
     A: AsRef<ag::Tensor<'graph, F>> + Copy,
 {
@@ -42,22 +118,7 @@ where
     ((s * math::exp(math::neg(q * t))) * nd1) - ((k * (-t * r).exp()) * nd2)
 }
 
-/// Calculate the price of a put option based on the
-/// Black Scholes Merton model for options pricing.
-///
-/// This function can price multiple options at once by inputing
-/// a multidimensional set of inputs. All multi dimensional inputs
-/// must have the same shape.
-///
-/// :param: `s` The underlying stocks' prices .
-/// :param: `k` The options' strike prices.
-/// :param: `vol` The volatility of the stocks.
-/// :param: `r` The risk free interest rate.
-/// :param: `q` The continously compounding divdend yield in decimal.
-/// :param: `t` The time until option maturity as decimal of a year.
-///
-/// :return: `prices` The price of the options.
-pub fn put<'graph, A, F: ag::Float>(s: A, k: A, vol: A, q: A, r: F, t: F) -> ag::Tensor<'graph, F>
+fn put<'graph, A, F: ag::Float>(s: A, k: A, vol: A, q: A, r: F, t: F) -> ag::Tensor<'graph, F>
 where
     A: AsRef<ag::Tensor<'graph, F>> + Copy,
 {
@@ -80,22 +141,7 @@ where
     ((k * (-r * t).exp()) * nnegd2) - ((s * math::exp(math::neg(q * t))) * nnegd1)
 }
 
-/// Determine the implied volatility for a call option using
-/// the Black Scholes option pricing method.
-///
-/// This function can price multiple options at once by inputing
-/// a multidimensional set of inputs. All multi dimensional inputs
-/// must have the same shape.
-///
-/// :param: `c` The call options' prices.
-/// :param: `s` The underlying stocks' prices.
-/// :param: `k` The options' strike prices.
-/// :param: `r` The risk free interest rate.
-/// :param: `q` The continously compounding divdend yield in decimal.
-/// :param: `t` The time until option maturity.
-///
-/// :return: `prices` The price of the options.
-pub fn call_iv<'graph, F: ag::Float>(
+fn call_iv<'graph, F: ag::Float>(
     c: ag::NdArrayView<F>,
     s: ag::NdArrayView<F>,
     k: ag::NdArrayView<F>,
@@ -136,22 +182,7 @@ pub fn call_iv<'graph, F: ag::Float>(
         .into_inner()
 }
 
-/// Determine the implied volatility for a put option using
-/// the Black Scholes option pricing method.
-///
-/// This function can price multiple options at once by inputing
-/// a multidimensional set of inputs. All multi dimensional inputs
-/// must have the same shape.
-///
-/// :param: `p` The put options' prices.
-/// :param: `s` The underlying stocks' prices.
-/// :param: `k` The options' strike prices.
-/// :param: `r` The risk free interest rate.
-/// :param: `q` The continously compounding divdend yield in decimal.
-/// :param: `t` The time until option maturity.
-///
-/// :return: `prices` The price of the options.
-pub fn put_iv<'graph, F: ag::Float>(
+fn put_iv<'graph, F: ag::Float>(
     p: ag::NdArrayView<F>,
     s: ag::NdArrayView<F>,
     k: ag::NdArrayView<F>,

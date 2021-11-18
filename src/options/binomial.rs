@@ -3,228 +3,201 @@ use autograd::array_gen as gen;
 use autograd::ndarray as nd;
 use autograd::tensor_ops as math;
 
+use crate::options::model::*;
 use autograd::prelude::*;
 
-/// Calculate the price of a call option based on the
-/// Binomial model for options pricing.
-///
-/// This function can price multiple options at once by inputing
-/// a multidimensional set of inputs. All multi dimensional inputs
-/// must have the same shape.
-///
-/// * `s`: The underlying stocks' prices per share.
-/// * `k`: The options' strike prices per share.
-/// * `vol`: The volatility of the stocks in decimal.
-/// * `r`: The risk free interest rate as decimal.
-/// * `q`: The divided of the stock per year as decimal.
-/// * `t`: The time until option maturity as decimal of a year.
-///
-/// * `prices`: The price of the options.
-pub fn call<'graph, A, F: ag::Float>(s: A, k: A, vol: A, q: A, r: F, t: F) -> ag::Tensor<'graph, F>
-where
-    A: AsRef<ag::Tensor<'graph, F>>,
-{
-    let dim: i32 = -1;
-    let s = s.as_ref().expand_dims(&[dim]);
-    let k = k.as_ref().expand_dims(&[dim]);
-    let vol = vol.as_ref().expand_dims(&[dim]);
-    let q = q.as_ref().expand_dims(&[dim]);
-    let rs = (s / s) * r;
-    let ts = (s / s) * t;
+pub struct BinomialPricingModel;
 
-    let packed = math::concat(&[s, k, vol, q, rs, ts], 0);
-    packed.map(|packed| {
-        packed.map_axis(nd::Axis(0), |col| {
-            let s = col[0];
-            let k = col[1];
-            let vol = col[2];
-            let q = col[3];
-            let r = col[4];
-            let t = col[5];
-            eval_one_call(s, k, vol, q, r, t)
-        })
-    })
-}
+impl OptionPricingModel for BinomialPricingModel {
+    fn price<'graph, A, F: ag::Float>(
+        ty: OptionType,
+        s: A,
+        k: A,
+        vol: A,
+        q: A,
+        r: F,
+        t: F,
+    ) -> ag::Tensor<'graph, F>
+    where
+        A: AsRef<ag::Tensor<'graph, F>> + Copy,
+    {
+        let dim: i32 = -1;
+        let s = s.as_ref().expand_dims(&[dim]);
+        let k = k.as_ref().expand_dims(&[dim]);
+        let vol = vol.as_ref().expand_dims(&[dim]);
+        let q = q.as_ref().expand_dims(&[dim]);
+        let rs = (s / s) * r;
+        let ts = (s / s) * t;
 
-/// Calculate the price of a put option based on the
-/// Binomial model for options pricing.
-///
-/// This function can price multiple options at once by inputing
-/// a multidimensional set of inputs. All multi dimensional inputs
-/// must have the same shape.
-///
-/// * `s`: The underlying stocks' prices per share.
-/// * `k`: The options' strike prices per share.
-/// * `vol`: The volatility of the stocks in decimal.
-/// * `r`: The risk free interest rate as decimal.
-/// * `q`: The divided of the stock per year as decimal.
-/// * `t`: The time until option maturity as decimal of a year.
-///
-/// * `prices`: The price of the options.
-pub fn put<'graph, A, F: ag::Float>(s: A, k: A, vol: A, q: A, r: F, t: F) -> ag::Tensor<'graph, F>
-where
-    A: AsRef<ag::Tensor<'graph, F>>,
-{
-    let dim: i32 = -1;
-    let s = s.as_ref().expand_dims(&[dim]);
-    let k = k.as_ref().expand_dims(&[dim]);
-    let vol = vol.as_ref().expand_dims(&[dim]);
-    let q = q.as_ref().expand_dims(&[dim]);
-    let rs = (s / s) * r;
-    let ts = (s / s) * t;
-
-    let packed = math::concat(&[s, k, vol, q, rs, ts], 0);
-    packed.map(|packed| {
-        packed.map_axis(nd::Axis(0), |col| {
-            let s = col[0];
-            let k = col[1];
-            let vol = col[2];
-            let q = col[3];
-            let r = col[4];
-            let t = col[5];
-            eval_one_put(s, k, vol, q, r, t)
-        })
-    })
-}
-
-/// Calculate the implied volatility based on the
-/// Binomial model for options pricing.
-///
-/// This function can price multiple options at once by inputing
-/// a multidimensional set of inputs. All multi dimensional inputs
-/// must have the same shape.
-///
-/// * `c`: The price of the call options.
-/// * `s`: The underlying stocks' prices per share.
-/// * `k`: The options' strike prices per share.
-/// * `r`: The risk free interest rate as decimal.
-/// * `q`: The divided of the stock per year as decimal.
-/// * `t`: The time until option maturity as decimal of a year.
-///
-/// * `prices`: The price of the options.
-pub fn call_iv<'graph, F: ag::Float>(
-    c: ag::NdArrayView<F>,
-    s: ag::NdArrayView<F>,
-    k: ag::NdArrayView<F>,
-    q: ag::NdArrayView<F>,
-    r: F,
-    t: F,
-) -> ag::NdArray<F> {
-    let mut env = ag::VariableEnvironment::new();
-    let ret_id = env.name("vol").set(gen::ones(c.shape()));
-
-    let adam = ag::optimizers::adam::Adam::default(
-        "AdamIV",
-        env.default_namespace().current_var_ids(),
-        &mut env,
-    );
-    for _ in 0..1000 {
-        env.run(|ctx| {
-            let vol = ctx.variable("vol");
-            let call_price = ctx.placeholder("c", &[-1]);
-            let spot = ctx.placeholder("s", &[-1]);
-            let strike = ctx.placeholder("k", &[-1]);
-            let dividends = ctx.placeholder("q", &[-1]);
-
-            let h = math::ones(&[1i32], ctx) * F::from(0.05f64).unwrap();
-
-            let m: i32 = 1;
-            let n: i32 = 2;
-
-            let losses = (-n/2..n/2+1)
-                .map(|i| {
-                    let voli = vol + (h * F::from(i).unwrap());
-                    let pred = call(&spot, &strike, &voli, &dividends, r, t);
-                    math::abs(call_price - pred)
+        let packed = math::concat(&[s, k, vol, q, rs, ts], 0);
+        match ty {
+            OptionType::Call => packed.map(|packed| {
+                packed.map_axis(nd::Axis(0), |col| {
+                    let s = col[0];
+                    let k = col[1];
+                    let vol = col[2];
+                    let q = col[3];
+                    let r = col[4];
+                    let t = col[5];
+                    eval_one_call(s, k, vol, q, r, t)
                 })
-                .collect::<Vec<_>>();
-            let grad = math::finite_difference(m as usize, n as usize, h, &losses[..]);
-
-            let mut feeder = ag::Feeder::new();
-            feeder
-                .push(call_price, c.view())
-                .push(spot, s.view())
-                .push(strike, k.view())
-                .push(dividends, q.view());
-
-            adam.update(&[vol], &[grad], ctx, feeder);
-        });
+            }),
+            OptionType::Put => packed.map(|packed| {
+                packed.map_axis(nd::Axis(0), |col| {
+                    let s = col[0];
+                    let k = col[1];
+                    let vol = col[2];
+                    let q = col[3];
+                    let r = col[4];
+                    let t = col[5];
+                    eval_one_put(s, k, vol, q, r, t)
+                })
+            }),
+        }
     }
 
-    env.get_array_by_id(ret_id).unwrap().clone().into_inner()
-}
+    fn implied_volatility<F: ag::Float>(
+        ty: OptionType,
+        p: ag::NdArrayView<F>,
+        s: ag::NdArrayView<F>,
+        k: ag::NdArrayView<F>,
+        q: ag::NdArrayView<F>,
+        r: F,
+        t: F,
+    ) -> ag::NdArray<F> {
+        let mut env = ag::VariableEnvironment::new();
+        let ret_id = env.name("vol").set(gen::ones(p.shape()));
+        let adam = ag::optimizers::adam::Adam::default(
+            "AdamIV",
+            env.default_namespace().current_var_ids(),
+            &mut env,
+        );
+        for _ in 0..1000 {
+            env.run(|ctx| {
+                let vol = ctx.variable("vol");
+                let price = ctx.placeholder("p", &[-1]);
+                let spot = ctx.placeholder("s", &[-1]);
+                let strike = ctx.placeholder("k", &[-1]);
+                let dividends = ctx.placeholder("q", &[-1]);
 
-/// Calculate the implied volatility based on the
-/// Binomial model for options pricing.
-///
-/// This function can price multiple options at once by inputing
-/// a multidimensional set of inputs. All multi dimensional inputs
-/// must have the same shape.
-///
-/// * `p`: The price of the put options.
-/// * `s`: The underlying stocks' prices per share.
-/// * `k`: The options' strike prices per share.
-/// * `r`: The risk free interest rate as decimal.
-/// * `q`: The divided of the stock per year as decimal.
-/// * `t`: The time until option maturity as decimal of a year.
-///
-/// * `prices`: The price of the options.
-pub fn put_iv<'graph, F: ag::Float>(
-    p: ag::NdArrayView<F>,
-    s: ag::NdArrayView<F>,
-    k: ag::NdArrayView<F>,
-    q: ag::NdArrayView<F>,
-    r: F,
-    t: F,
-) -> ag::NdArray<F> {
-    let mut env = ag::VariableEnvironment::new();
-    let ret_id = env.name("vol").set(gen::ones(p.shape()));
+                let h = math::ones(&[1i32], ctx) * F::from(0.05_f64).unwrap();
 
-    let adam = ag::optimizers::adam::Adam::default(
-        "AdamIV",
-        env.default_namespace().current_var_ids(),
-        &mut env,
-    );
-    for _ in 0..1000 {
-        env.run(|ctx| {
-            let vol = ctx.variable("vol");
-            let put_price = ctx.placeholder("p", &[-1]);
-            let spot = ctx.placeholder("s", &[-1]);
-            let strike = ctx.placeholder("k", &[-1]);
-            let dividends = ctx.placeholder("q", &[-1]);
+                let m: i32 = 1;
+                let n: i32 = 2;
 
-            let h = math::ones(&[1i32], ctx) * F::from(0.05f64).unwrap();
+                let losses = (-n / 2..n / 2 + 1)
+                    .map(|i| {
+                        let voli = vol + (h * F::from(i).unwrap());
+                        let pred = BinomialPricingModel::price(
+                            ty, &spot, &strike, &voli, &dividends, r, t,
+                        );
+                        math::abs(price - pred)
+                    })
+                    .collect::<Vec<_>>();
+                let grad = math::finite_difference(m as usize, n as usize, h, &losses[..]);
 
-            let m: i32 = 1;
-            let n: i32  = 2;
+                let mut feeder = ag::Feeder::new();
+                feeder
+                    .push(price, p.view())
+                    .push(spot, s.view())
+                    .push(strike, k.view())
+                    .push(dividends, q.view());
 
-            let losses = (-n/2..n/2+1)
-                .map(|i| {
-                    let voli = vol + (h * F::from(i).unwrap());
-                    let pred = put(&spot, &strike, &voli, &dividends, r, t);
-                    math::abs(put_price - pred)
-                })
-                .collect::<Vec<_>>();
-            let grad = math::finite_difference(m as usize, n as usize, h, &losses[..]);
-
-            let mut feeder = ag::Feeder::new();
-            feeder
-                .push(put_price, p.view())
-                .push(spot, s.view())
-                .push(strike, k.view())
-                .push(dividends, q.view());
-
-            adam.update(&[vol], &[grad], ctx, feeder);
-        });
+                adam.update(&[vol], &[grad], ctx, feeder);
+            });
+        }
+        env.get_array_by_id(ret_id).unwrap().clone().into_inner()
     }
 
-    env.get_array_by_id(ret_id).unwrap().clone().into_inner()
-}
+    fn delta<'graph, A, F: ag::Float>(ty: OptionType, s: A, k: A, vol: A, q: A, r: F, t: F) -> ag::Tensor<'graph, F> 
+    where
+        A: AsRef<ag::Tensor<'graph, F>> + Copy 
+    {
+        let stock_price = s.as_ref();
 
-#[derive(Copy, Clone, Eq, PartialEq)]
-enum OptionType {
-    Call,
-    Put,
+        let m: i32 = 1;
+        let n: i32 = 2;
+        // Hacky way to get a scalar tensor.
+        let h = math::reduce_sum(math::flatten(s.as_ref()) * F::zero(), &[-1_i32], false) + F::from(0.05_f64).unwrap();
+
+        let stencil_points = (-n / 2..n / 2 + 1)
+            .map(|i| {
+                let stock_price_i = stock_price + (h * F::from(i).unwrap());
+                let pred = BinomialPricingModel::price(
+                    ty, stock_price_i.as_ref(), k.as_ref(), vol.as_ref(), q.as_ref(), r, t,
+                );
+                pred
+            })
+            .collect::<Vec<_>>();
+        let grad = math::finite_difference(m as usize, n as usize, h, &stencil_points[..]);
+        grad
+    }
+
+    fn theta<'graph, A, F: ag::Float>(ty: OptionType, s: A, k: A, vol: A, q: A, r: F, t: F) -> ag::Tensor<'graph, F>
+    where
+        A: AsRef<ag::Tensor<'graph, F>> + Copy
+    {
+        let m: i32 = 1;
+        let n: i32 = 2;
+        // Hacky way to get a scalar tensor.
+        let h = math::reduce_sum(math::flatten(s.as_ref()) * F::zero(), &[-1_i32], false) + F::from(0.05_f64).unwrap();
+
+        let stencil_points = (-n / 2..n / 2 + 1)
+            .map(|i| {
+                let ti = t - (F::from(i).unwrap() * F::from(0.05_f64).unwrap());
+                let pred = BinomialPricingModel::price(
+                    ty, s.as_ref(), k.as_ref(), vol.as_ref(), q.as_ref(), r, ti,
+                );
+                pred
+            })
+            .collect::<Vec<_>>();
+        let grad = math::finite_difference(m as usize, n as usize, h, &stencil_points[..]);
+        grad
+    }
+
+    fn gamma<'graph, A, F: ag::Float>(ty: OptionType, s: A, k: A, vol: A, q: A, r: F, t: F) -> ag::Tensor<'graph, F>
+    where
+        A: AsRef<ag::Tensor<'graph, F>> + Copy
+    {
+        let m: i32 = 1;
+        let n: i32 = 2;
+        // Hacky way to get a scalar tensor.
+        let h = math::reduce_sum(math::flatten(s.as_ref()) * F::zero(), &[-1_i32], false) + F::from(0.05_f64).unwrap();
+
+        let stencil_points = (-n / 2..n / 2 + 1)
+            .map(|i| {
+                let ti = t - (F::from(i).unwrap() * F::from(0.05_f64).unwrap());
+                let pred = BinomialPricingModel::delta(
+                    ty, s.as_ref(), k.as_ref(), vol.as_ref(), q.as_ref(), r, ti,
+                );
+                pred
+            })
+            .collect::<Vec<_>>();
+        let grad = math::finite_difference(m as usize, n as usize, h, &stencil_points[..]);
+        grad
+    }
+
+    fn vega<'graph, A, F: ag::Float>(ty: OptionType, s: A, k: A, vol: A, q: A, r: F, t: F) -> ag::Tensor<'graph, F>
+    where
+        A: AsRef<ag::Tensor<'graph, F>> + Copy
+    {
+        let m: i32 = 1;
+        let n: i32 = 2;
+        // Hacky way to get a scalar tensor.
+        let h = math::reduce_sum(math::flatten(s.as_ref()) * F::zero(), &[-1_i32], false) + F::from(0.05_f64).unwrap();
+
+        let stencil_points = (-n / 2..n / 2 + 1)
+            .map(|i| {
+                let vol_i = vol.as_ref() + (h * F::from(i).unwrap());
+                let pred = BinomialPricingModel::price(
+                    ty, s.as_ref(), k.as_ref(), vol_i.as_ref(), q.as_ref(), r, t,
+                );
+                pred
+            })
+            .collect::<Vec<_>>();
+        let grad = math::finite_difference(m as usize, n as usize, h, &stencil_points[..]);
+        grad
+    }
 }
 
 fn eval_one_call<F: ag::Float>(s: F, k: F, vol: F, q: F, r: F, t: F) -> F {
