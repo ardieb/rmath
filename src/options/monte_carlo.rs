@@ -43,7 +43,7 @@ impl OptionPricingModel for MonteCarloPricingModel {
                     let q = col[3];
                     let r = col[4];
                     let t = col[5];
-                    eval_one_call(s, k, vol, q, r, t)
+                    eval_one_call(s, k, vol, q, r, t, 500)
                 })
             }),
             OptionType::Put => packed.map(|packed| {
@@ -54,7 +54,7 @@ impl OptionPricingModel for MonteCarloPricingModel {
                     let q = col[3];
                     let r = col[4];
                     let t = col[5];
-                    eval_one_put(s, k, vol, q, r, t)
+                    eval_one_put(s, k, vol, q, r, t, 500)
                 })
             }),
         }
