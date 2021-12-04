@@ -1,5 +1,9 @@
-## rmath library
+# Rust Quantitative Analysis Library
 I got bored and so I started implementing autograd features for rust including polynomial evaluation, error functions and normal distributions.
-
-The goal is to have a differentiable library that can be used to perform Black Scholes options pricing using SGD or some other form of gradient
-descent algorithm.
+## Purpose
+The goal is to implement multiple pricing models for various niche markets. This incldues all forms of derivatives, options, futures, warrant bonds, convertibles, crypto derivatives, etc...
+## Principles
+- Interfaces should be simple.
+- Models should be universal and interchangable.
+- Performance is critical in the case of real time analysis.
+- All pricing models should be extensible.
